@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+// config for ocsadapter
+package adapter.ocsadapter.config;
+
+import "gogoproto/gogo.proto";
+
+option go_package="config";
+
+// config for ocsadapter
+message Params {
+
+    // deployed ocs address
+    string ocs_address = 1;
+}
