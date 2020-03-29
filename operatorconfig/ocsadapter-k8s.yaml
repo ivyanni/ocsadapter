@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocsadapter
+  namespace: istio-system
+  labels:
+    app: ocsadapter
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: ocsadapter
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: ocsadapter
+  namespace: istio-system
+  labels:
+    app: ocsadapter
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: ocsadapter
+      annotations:
+        sidecar.istio.io/inject: "false"
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+    spec:
+      containers:
+        - name: ocsadapter
+          image: ivyanni/ocsadapter:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: transient-storage
+              mountPath: /volume
+      volumes:
+        - name: transient-storage
+          emptyDir: {}
