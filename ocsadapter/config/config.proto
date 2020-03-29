@@ -12,4 +12,10 @@ message Params {
 
     // deployed ocs address
     string ocs_address = 1;
+
+    // units to request (could be a few values divided by comma)
+    string request_units = 2;
+
+    // units used for update request sent
+    string units_until_update = 3;
 }

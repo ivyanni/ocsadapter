@@ -11,7 +11,9 @@ spec:
     #address: "mygrpcadapterservice:44225"
     #address: "35.184.34.117:44225"
   params:
-    ocs_address: "34.91.113.150:3868"
+    ocs_address: "10.0.2.2:3000"
+    request_units: "10000,5"
+    units_until_update: "3"
 ---
 apiVersion: "config.istio.io/v1alpha2"
 kind: instance

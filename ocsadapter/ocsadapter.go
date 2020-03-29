@@ -11,6 +11,8 @@ import (
 	"github.com/ivyanni/ocsadapter/ocsadapter/client"
 	"github.com/ivyanni/ocsadapter/ocsadapter/config"
 	"net"
+	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -77,6 +79,14 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 	}
 
 	log.Infof("ocs address: %v", cfg.OcsAddress)
+	log.Infof("request units: %v", cfg.RequestUnits)
+	log.Infof("units until update: %v", cfg.UnitsUntilUpdate)
+
+	requestUnits := strings.Split(cfg.RequestUnits, ",")
+	unitsUntilUpdate, err := strconv.Atoi(cfg.UnitsUntilUpdate)
+	if err != nil {
+		log.Fatalf("Couldn't parse value %v", cfg.UnitsUntilUpdate)
+	}
 
 	props := decodeValueMap(r.Instance.Subject.Properties)
 	log.Infof("%v", props)
@@ -87,7 +97,7 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 			value := fmt.Sprintf("%v", v)
 			log.Infof("success!! value = %v", grantedMap[value])
 			if grantedMap[value] == 0 {
-				grantedUnits := client.GetUnits(cfg.OcsAddress, value, usedMap[value])
+				grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedMap[value])
 				log.Infof("success!! granted units = %v", grantedUnits)
 				if grantedUnits > 0 {
 					usedMap[value] = 1
@@ -97,6 +107,11 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 					}, nil
 				}
 			} else {
+				if usedMap[value] == unitsUntilUpdate {
+					grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedMap[value])
+					grantedMap[value] = grantedUnits
+					usedMap[value] = 0
+				}
 				usedMap[value]++
 				grantedMap[value]--
 				return &v1beta1.CheckResult{

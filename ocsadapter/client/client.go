@@ -18,27 +18,50 @@ var done = make(chan *diam.Message, 1000)
 var cfg *sm.Settings
 var conn diam.Conn
 
-func GetUnits(ocsAddress string, applicationId string, used int) int {
-	sendCCR(ocsAddress, applicationId, used, false)
-	select {
-	case m := <-done:
-		timeAvp, err := m.FindAVP(avp.CCTime, 0)
+func GetUnits(ocsAddress string, applicationId string, requestUnits []string, used int) int {
+	createMux(ocsAddress)
+	for i := range requestUnits {
+		units, err := strconv.Atoi(requestUnits[i])
 		if err != nil {
-			log.Warnf("Couldn't find CC-Time AVP in response for %s", applicationId)
-			return 0
+			log.Fatalf("Couldn't parse a value %v", requestUnits[0])
 		}
-		grantedAmount := int(timeAvp.Data.(datatype.Unsigned32))
-		log.Infof("grantedAmount: %v", grantedAmount)
-		return grantedAmount
-	case <-time.After(5 * time.Second):
-		log.Fatalf("timeout: no hello answer received")
+		if used == 0 {
+			sendCCRI(applicationId, units)
+		} else {
+			sendCCRU(applicationId, used, units)
+		}
+		select {
+		case m := <-done:
+			resultCodeAvp, err := m.FindAVP(avp.ResultCode, 0)
+			if err != nil {
+				log.Warnf("Couldn't find Result-Code AVP in response for %s", applicationId)
+				return 0
+			}
+			resultCode := int(resultCodeAvp.Data.(datatype.Unsigned32))
+			if resultCode == 4012 {
+				continue
+			}
+			timeAvp, err := m.FindAVP(avp.CCTime, 0)
+			if err != nil {
+				log.Warnf("Couldn't find CC-Time AVP in response for %s", applicationId)
+				return 0
+			}
+			grantedAmount := int(timeAvp.Data.(datatype.Unsigned32))
+			log.Infof("grantedAmount: %v", grantedAmount)
+			return grantedAmount
+		case <-time.After(5 * time.Second):
+			log.Fatalf("timeout: no hello answer received")
+		}
 	}
 	return 0
 }
 
 func Terminate(usedMap map[string]int) {
+	if conn == nil {
+		return
+	}
 	for applicationId, used := range usedMap {
-		sendCCR(conn.RemoteAddr().String(), applicationId, used, true)
+		sendCCRT(applicationId, used)
 	}
 }
 
@@ -105,37 +128,19 @@ func printErrors(ec <-chan *diam.ErrorReport) {
 	}
 }
 
-func sendCCR(ocsAddress string, applicationId string, used int, terminate bool) {
-	createMux(ocsAddress)
+func sendCCRI(applicationId string, requestUnits int) {
 	log.Infof("send CCR to %v", conn.RemoteAddr().String())
 	meta, ok := smpeer.FromContext(conn.Context())
 	if !ok {
 		log.Fatalf("Client connection does not contain metadata")
 	}
-	var m *diam.Message
-	if used == 0 {
-		m = sendCCRI(applicationId, meta.OriginRealm)
-	} else {
-		if terminate {
-			m = sendCCRT(applicationId, meta.OriginRealm, used)
-		} else {
-			m = sendCCRU(applicationId, meta.OriginRealm, used)
-		}
-	}
-	log.Infof("CCR: %v", m)
-	if _, err := m.WriteTo(conn); err != nil {
-		log.Fatalf(err.Error())
-	}
-}
-
-func sendCCRI(applicationId string, originRealm datatype.DiameterIdentity) *diam.Message {
 	subscriptionId, _ := strconv.ParseUint(applicationId, 10, 32)
 	m := diam.NewRequest(diam.CreditControl, 4, dict.Default)
 	m.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4))
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(strconv.Itoa(0)))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
-	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, originRealm)
+	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 	m.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.OctetString("32251@3gpp.org"))
 	m.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
@@ -152,22 +157,29 @@ func sendCCRI(applicationId string, originRealm datatype.DiameterIdentity) *diam
 			diam.NewAVP(avp.RatingGroup, avp.Mbit, 0, datatype.Unsigned32(0)),
 			diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(10)),
+					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(requestUnits)),
 				},
 			}),
 		},
 	})
-	return m
+	if _, err := m.WriteTo(conn); err != nil {
+		log.Fatalf(err.Error())
+	}
 }
 
-func sendCCRU(applicationId string, originRealm datatype.DiameterIdentity, used int) *diam.Message {
+func sendCCRU(applicationId string, used int, requestUnits int) {
+	log.Infof("send CCR to %v", conn.RemoteAddr().String())
+	meta, ok := smpeer.FromContext(conn.Context())
+	if !ok {
+		log.Fatalf("Client connection does not contain metadata")
+	}
 	subscriptionId, _ := strconv.ParseUint(applicationId, 10, 32)
 	m := diam.NewRequest(diam.CreditControl, 4, dict.Default)
 	m.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4))
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(strconv.Itoa(0)))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
-	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, originRealm)
+	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 	m.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.OctetString("32251@3gpp.org"))
 	m.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
@@ -189,22 +201,29 @@ func sendCCRU(applicationId string, originRealm datatype.DiameterIdentity, used 
 			}),
 			diam.NewAVP(avp.RequestedServiceUnit, avp.Mbit, 0, &diam.GroupedAVP{
 				AVP: []*diam.AVP{
-					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(10)),
+					diam.NewAVP(avp.CCTime, avp.Mbit, 0, datatype.Unsigned32(requestUnits)),
 				},
 			}),
 		},
 	})
-	return m
+	if _, err := m.WriteTo(conn); err != nil {
+		log.Fatalf(err.Error())
+	}
 }
 
-func sendCCRT(applicationId string, originRealm datatype.DiameterIdentity, used int) *diam.Message {
+func sendCCRT(applicationId string, used int) {
+	log.Infof("send CCR to %v", conn.RemoteAddr().String())
+	meta, ok := smpeer.FromContext(conn.Context())
+	if !ok {
+		log.Fatalf("Client connection does not contain metadata")
+	}
 	subscriptionId, _ := strconv.ParseUint(applicationId, 10, 32)
 	m := diam.NewRequest(diam.CreditControl, 4, dict.Default)
 	m.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(4))
 	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(strconv.Itoa(0)))
 	m.NewAVP(avp.OriginHost, avp.Mbit, 0, cfg.OriginHost)
 	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, cfg.OriginRealm)
-	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, originRealm)
+	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, meta.OriginRealm)
 	m.NewAVP(avp.ServiceContextID, avp.Mbit, 0, datatype.OctetString("32251@3gpp.org"))
 	m.NewAVP(avp.SubscriptionID, avp.Mbit, 0, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
@@ -226,7 +245,9 @@ func sendCCRT(applicationId string, originRealm datatype.DiameterIdentity, used 
 			}),
 		},
 	})
-	return m
+	if _, err := m.WriteTo(conn); err != nil {
+		log.Fatalf(err.Error())
+	}
 }
 
 func handleCCA() diam.HandlerFunc {
