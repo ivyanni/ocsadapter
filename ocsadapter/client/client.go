@@ -20,15 +20,16 @@ var conn diam.Conn
 
 func GetUnits(ocsAddress string, applicationId string, requestUnits []string, used int) int {
 	createMux(ocsAddress)
+	forceUpdate := false
 	for i := range requestUnits {
 		units, err := strconv.Atoi(requestUnits[i])
 		if err != nil {
 			log.Fatalf("Couldn't parse a value %v", requestUnits[0])
 		}
-		if used == 0 {
-			sendCCRI(applicationId, units)
-		} else {
+		if used != 0 || forceUpdate {
 			sendCCRU(applicationId, used, units)
+		} else {
+			sendCCRI(applicationId, units)
 		}
 		select {
 		case m := <-done:
@@ -39,6 +40,8 @@ func GetUnits(ocsAddress string, applicationId string, requestUnits []string, us
 			}
 			resultCode := int(resultCodeAvp.Data.(datatype.Unsigned32))
 			if resultCode == 4012 {
+				used = 0
+				forceUpdate = true
 				continue
 			}
 			timeAvp, err := m.FindAVP(avp.CCTime, 0)

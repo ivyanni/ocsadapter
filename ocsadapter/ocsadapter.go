@@ -13,6 +13,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -104,6 +105,8 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 					grantedMap[value] = grantedUnits - 1
 					return &v1beta1.CheckResult{
 						Status: status.OK,
+						ValidDuration: 0 * time.Second,
+						ValidUseCount: 0,
 					}, nil
 				}
 			} else {
@@ -116,6 +119,8 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 				grantedMap[value]--
 				return &v1beta1.CheckResult{
 					Status: status.OK,
+					ValidDuration: 0 * time.Second,
+					ValidUseCount: 0,
 				}, nil
 			}
 		}
