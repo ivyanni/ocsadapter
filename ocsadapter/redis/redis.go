@@ -12,7 +12,7 @@ var client *redis.Client
 func GetUsedUnits(applicationId string) int {
 	val, err := getRedisClient().HGet(applicationId, "used").Result()
 	if err == redis.Nil {
-		return -1
+		return 0
 	}
 	units, parseErr := strconv.Atoi(val)
 	if parseErr != nil {
@@ -24,7 +24,7 @@ func GetUsedUnits(applicationId string) int {
 func GetRemainingUnits(applicationId string) int {
 	val, err := getRedisClient().HGet(applicationId, "remaining").Result()
 	if err == redis.Nil {
-		return -1
+		return 0
 	}
 	units, parseErr := strconv.Atoi(val)
 	if parseErr != nil {
@@ -62,12 +62,12 @@ func GetUsageInfo() map[string]int {
 
 func IncreaseUsedValue(applicationId string) {
 	val := GetUsedUnits(applicationId)
-	SetUsedUnits(applicationId, val + 1)
+	SetUsedUnits(applicationId, val+1)
 }
 
 func DecreaseRemainingValue(applicationId string) {
 	val := GetRemainingUnits(applicationId)
-	SetRemainingUnits(applicationId, val - 1)
+	SetRemainingUnits(applicationId, val-1)
 }
 
 func getRedisClient() *redis.Client {
