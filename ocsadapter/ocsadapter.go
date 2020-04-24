@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/ivyanni/ocsadapter/ocsadapter/client"
 	"github.com/ivyanni/ocsadapter/ocsadapter/config"
+	"github.com/ivyanni/ocsadapter/ocsadapter/redis"
 	"net"
 	"strconv"
 	"strings"
@@ -23,9 +24,6 @@ import (
 	"istio.io/istio/mixer/template/authorization"
 	"istio.io/pkg/log"
 )
-
-var grantedMap = make(map[string]int)
-var usedMap = make(map[string]int)
 
 type (
 	// Server is basic server interface
@@ -96,13 +94,15 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 		fmt.Println("k:", k, "v:", v)
 		if k == "application_id" {
 			value := fmt.Sprintf("%v", v)
-			log.Infof("success!! value = %v", grantedMap[value])
-			if grantedMap[value] == 0 {
-				grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedMap[value])
+			remainingUnits := redis.GetRemainingUnits(value)
+			usedUnits := redis.GetUsedUnits(value)
+			log.Infof("success!! value = %v", remainingUnits)
+			if remainingUnits == 0 {
+				grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedUnits)
 				log.Infof("success!! granted units = %v", grantedUnits)
 				if grantedUnits > 0 {
-					usedMap[value] = 1
-					grantedMap[value] = grantedUnits - 1
+					redis.SetUsedUnits(value, 1)
+					redis.SetRemainingUnits(value, grantedUnits - 1)
 					return &v1beta1.CheckResult{
 						Status: status.OK,
 						ValidDuration: 0 * time.Second,
@@ -110,13 +110,13 @@ func (s *OcsAdapter) HandleAuthorization(ctx context.Context, r *authorization.H
 					}, nil
 				}
 			} else {
-				if usedMap[value] == unitsUntilUpdate {
-					grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedMap[value])
-					grantedMap[value] = grantedUnits
-					usedMap[value] = 0
+				if usedUnits == unitsUntilUpdate {
+					grantedUnits := client.GetUnits(cfg.OcsAddress, value, requestUnits, usedUnits)
+					redis.SetUsedUnits(value, 0)
+					redis.SetRemainingUnits(value, grantedUnits)
 				}
-				usedMap[value]++
-				grantedMap[value]--
+				redis.IncreaseUsedValue(value)
+				redis.DecreaseRemainingValue(value)
 				return &v1beta1.CheckResult{
 					Status: status.OK,
 					ValidDuration: 0 * time.Second,
@@ -144,7 +144,8 @@ func (s *OcsAdapter) Run(shutdown chan error) {
 
 // Close gracefully shuts down the server; used for testing
 func (s *OcsAdapter) Close() error {
-	client.Terminate(usedMap)
+	usageMap := redis.GetUsageInfo()
+	client.Terminate(usageMap)
 
 	if s.server != nil {
 		s.server.GracefulStop()

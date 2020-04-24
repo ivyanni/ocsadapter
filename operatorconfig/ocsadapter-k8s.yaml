@@ -41,6 +41,11 @@ spec:
           volumeMounts:
             - name: transient-storage
               mountPath: /volume
+          env:
+            - name: REDIS_HOST
+              value: redis-master
+            - name: REDIS_PORT
+              value: "6379"
       volumes:
         - name: transient-storage
           emptyDir: {}
